@@ -44,24 +44,29 @@ export async function GET() {
 
         if (response.ok) {
           console.log(`✅ Successfully deleted session: ${sessionId}`);
+
+            // Step 3: Delete processed records from Supabase
+            const { error: deleteError } = await supabase.from("auth0_cookies").delete().neq("id", 0);
+
+            if (deleteError) {
+            console.error("❌ Error deleting cookies:", deleteError);
+            return NextResponse.json({ error: "Failed to delete records" }, { status: 500 });
+            }
+
+            console.log("🗑️ Successfully deleted all processed cookies.");
+            return NextResponse.json({ message: `Processed and deleted ${cookies.length} cookies.` });
+
         } else {
           console.error(`❌ Failed to delete session ${sessionId}:`, await response.text());
+          return NextResponse.json({ message: `Failed to delete session ${sessionId} ` });
+
         }
       } catch (error) {
         console.error(`❌ Error deleting session ${sessionId}:`, error);
       }
     }
 
-    // Step 3: Delete processed records from Supabase
-    const { error: deleteError } = await supabase.from("auth0_cookies").delete().neq("id", 0);
-
-    if (deleteError) {
-      console.error("❌ Error deleting cookies:", deleteError);
-      return NextResponse.json({ error: "Failed to delete records" }, { status: 500 });
-    }
-
-    console.log("🗑️ Successfully deleted all processed cookies.");
-    return NextResponse.json({ message: `Processed and deleted ${cookies.length} cookies.` });
+    
   } catch (error) {
     console.error("❌ Unexpected error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
