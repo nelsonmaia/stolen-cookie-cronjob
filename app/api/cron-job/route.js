@@ -54,7 +54,7 @@ export async function GET() {
             }
 
             console.log("🗑️ Successfully deleted all processed cookies.");
-            return NextResponse.json({ message: `Processed and deleted ${cookies.length} cookies.` });
+            
 
         } else {
           console.error(`❌ Failed to delete session ${sessionId}:`, await response.text());
@@ -66,7 +66,7 @@ export async function GET() {
       }
     }
 
-    
+    return NextResponse.json({ message: `Processed and deleted ${cookies.length} cookies.` });
   } catch (error) {
     console.error("❌ Unexpected error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
