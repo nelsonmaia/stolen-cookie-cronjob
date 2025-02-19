@@ -12,26 +12,59 @@ const AUTH0_TOKEN = process.env.AUTH0_TOKEN;
 
 export async function GET() {
   try {
-    console.log("⏰ Running Cron Job...");
+    console.log("⏰ Running Manual Cleanup Job...");
 
-    // Step 1: Fetch all records from the `auth0_cookies` table
-    const { data: cookies, error } = await supabase.from("auth0_cookies").select("*");
+    // Step 1: Fetch stolen cookies from "spycloud" table
+    const { data: stolenCookies, error: stolenError } = await supabase
+      .from("spycloud")
+      .select("stolen_cookie");
 
-    if (error) {
-      console.error("❌ Error fetching cookies:", error);
-      return NextResponse.json({ error: "Failed to fetch data" }, { status: 500 });
+    if (stolenError) {
+      console.error("❌ Error fetching stolen cookies:", stolenError);
+      return NextResponse.json({ error: "Failed to fetch stolen cookies" }, { status: 500 });
     }
 
-    if (!cookies || cookies.length === 0) {
-      console.log("✅ No cookies found, exiting.");
-      return NextResponse.json({ message: "No cookies found" });
+    if (!stolenCookies || stolenCookies.length === 0) {
+      console.log("✅ No stolen cookies found, exiting.");
+      return NextResponse.json({ message: "No stolen cookies found" });
     }
 
-    console.log(`🍪 Found ${cookies.length} cookies. Processing...`);
+    console.log(`🚨 Found ${stolenCookies.length} stolen cookies. Searching for matches...`);
 
-    // Step 2: Iterate over each session and delete it from Auth0
-    for (const cookie of cookies) {
-      const sessionId = cookie.session_id; // Assuming session ID is stored in `value`
+    // Step 2: Fetch all Auth0 cookies
+    const { data: authCookies, error: authError } = await supabase
+      .from("auth0_cookies")
+      .select("id, value, session_id");
+
+    if (authError) {
+      console.error("❌ Error fetching auth0 cookies:", authError);
+      return NextResponse.json({ error: "Failed to fetch auth0 cookies" }, { status: 500 });
+    }
+
+    if (!authCookies || authCookies.length === 0) {
+      console.log("✅ No auth0 cookies found, exiting.");
+      return NextResponse.json({ message: "No auth0 cookies found" });
+    }
+
+    console.log(`🔎 Checking ${authCookies.length} auth0 cookies against stolen data...`);
+
+    // Step 3: Find matching cookies
+    const matchingCookies = authCookies.filter((authCookie) =>
+      stolenCookies.some((stolen) => stolen.stolen_cookie === authCookie.value)
+    );
+
+    if (matchingCookies.length === 0) {
+      console.log("✅ No matching cookies found.");
+      return NextResponse.json({ message: "No matching sessions found for deletion." });
+    }
+
+    console.log(`⚠️ Found ${matchingCookies.length} matching sessions. Deleting...`);
+
+    let deletedSessions = 0;
+
+    for (const cookie of matchingCookies) {
+      const sessionId = cookie.session_id;
+      if (!sessionId) continue;
 
       try {
         const response = await fetch(`https://${AUTH0_DOMAIN}/api/v2/sessions/${sessionId}`, {
@@ -45,28 +78,27 @@ export async function GET() {
         if (response.ok) {
           console.log(`✅ Successfully deleted session: ${sessionId}`);
 
-            // Step 3: Delete processed records from Supabase
-            const { error: deleteError } = await supabase.from("auth0_cookies").delete().neq("id", 0);
+          // Remove from Supabase after successful deletion
+          const { error: deleteError } = await supabase
+            .from("auth0_cookies")
+            .delete()
+            .eq("session_id", sessionId);
 
-            if (deleteError) {
-            console.error("❌ Error deleting cookies:", deleteError);
-            return NextResponse.json({ error: "Failed to delete records" }, { status: 500 });
-            }
-
-            console.log("🗑️ Successfully deleted all processed cookies.");
-            
-
+          if (deleteError) {
+            console.error("❌ Error deleting session from Supabase:", deleteError);
+          } else {
+            deletedSessions++;
+          }
         } else {
           console.error(`❌ Failed to delete session ${sessionId}:`, await response.text());
-          return NextResponse.json({ message: `Failed to delete session ${sessionId} ` });
-
         }
       } catch (error) {
         console.error(`❌ Error deleting session ${sessionId}:`, error);
       }
     }
 
-    return NextResponse.json({ message: `Processed and deleted ${cookies.length} cookies.` });
+    console.log(`🗑️ Successfully deleted ${deletedSessions} sessions.`);
+    return NextResponse.json({ message: `Deleted ${deletedSessions} matching sessions.` });
   } catch (error) {
     console.error("❌ Unexpected error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
